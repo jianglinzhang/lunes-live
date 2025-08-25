@@ -379,56 +379,123 @@ class VPSMonitor:
     
     async def connect_websocket(self) -> bool:
         """连接WebSocket"""
-        try:
-            # 首先获取JWT token
-            jwt_token = await self.get_websocket_token()
-            if not jwt_token:
-                logger.error("无法获取JWT token，WebSocket连接失败")
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 每次连接前都获取新的JWT token
+                jwt_token = await self.get_websocket_token()
+                if not jwt_token:
+                    logger.error(f"无法获取JWT token，WebSocket连接失败 (尝试 {attempt + 1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(5)
+                        continue
+                    return False
+                
+                # 构建WebSocket URL
+                ws_url = f"wss://{self.config.node_host}:{self.config.ws_port}/api/servers/{self.config.server_uuid}/ws"
+                
+                # 准备cookies
+                cookies = {
+                    'pterodactyl_session': self.session_cookie,
+                    'XSRF-TOKEN': self.xsrf_token
+                }
+                
+                # 构建cookie字符串
+                cookie_str = '; '.join([f"{k}={v}" for k, v in cookies.items()])
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                    'Origin': self.config.panel_url,
+                    'Cookie': cookie_str
+                }
+    
+                # 创建SSL上下文，禁用证书验证
+                import ssl
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
+                self.ws_connection = await websockets.connect(ws_url, extra_headers=headers, ssl=ssl_context)
+                logger.info("WebSocket连接成功")
+                
+                # 发送认证命令
+                auth_command = {
+                    "event": "auth",
+                    "args": [jwt_token]
+                }
+                
+                if await self.send_command(auth_command):
+                    logger.info("WebSocket认证命令已发送")
+                    return True
+                else:
+                    logger.error("WebSocket认证命令发送失败")
+                    if self.ws_connection:
+                        await self.ws_connection.close()
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(5)
+                        continue
+                    return False
+                
+            except Exception as e:
+                logger.error(f"WebSocket连接失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if self.ws_connection:
+                    await self.ws_connection.close()
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(5)
+                    continue
                 return False
+        
+        return False
+        # try:
+        #     # 首先获取JWT token
+        #     jwt_token = await self.get_websocket_token()
+        #     if not jwt_token:
+        #         logger.error("无法获取JWT token，WebSocket连接失败")
+        #         return False
             
-            # 构建WebSocket URL
-            ws_url = f"wss://{self.config.node_host}:{self.config.ws_port}/api/servers/{self.config.server_uuid}/ws"
+        #     # 构建WebSocket URL
+        #     ws_url = f"wss://{self.config.node_host}:{self.config.ws_port}/api/servers/{self.config.server_uuid}/ws"
             
-            # 准备cookies
-            cookies = {
-                'pterodactyl_session': self.session_cookie,
-                'XSRF-TOKEN': self.xsrf_token
-            }
+        #     # 准备cookies
+        #     cookies = {
+        #         'pterodactyl_session': self.session_cookie,
+        #         'XSRF-TOKEN': self.xsrf_token
+        #     }
             
-            # 构建cookie字符串
-            cookie_str = '; '.join([f"{k}={v}" for k, v in cookies.items()])
+        #     # 构建cookie字符串
+        #     cookie_str = '; '.join([f"{k}={v}" for k, v in cookies.items()])
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                'Origin': self.config.panel_url,
-                'Cookie': cookie_str
-            }
+        #     headers = {
+        #         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        #         'Origin': self.config.panel_url,
+        #         'Cookie': cookie_str
+        #     }
 
-            # 创建SSL上下文，禁用证书验证
-            import ssl
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
+        #     # 创建SSL上下文，禁用证书验证
+        #     import ssl
+        #     ssl_context = ssl.create_default_context()
+        #     ssl_context.check_hostname = False
+        #     ssl_context.verify_mode = ssl.CERT_NONE
             
-            self.ws_connection = await websockets.connect(ws_url, extra_headers=headers, ssl=ssl_context)
-            logger.info("WebSocket连接成功")
+        #     self.ws_connection = await websockets.connect(ws_url, extra_headers=headers, ssl=ssl_context)
+        #     logger.info("WebSocket连接成功")
             
-            # 发送认证命令
-            auth_command = {
-                "event": "auth",
-                "args": [jwt_token]
-            }
+        #     # 发送认证命令
+        #     auth_command = {
+        #         "event": "auth",
+        #         "args": [jwt_token]
+        #     }
             
-            if await self.send_command(auth_command):
-                logger.info("WebSocket认证命令已发送")
-                return True
-            else:
-                logger.error("WebSocket认证命令发送失败")
-                return False
+        #     if await self.send_command(auth_command):
+        #         logger.info("WebSocket认证命令已发送")
+        #         return True
+        #     else:
+        #         logger.error("WebSocket认证命令发送失败")
+        #         return False
             
-        except Exception as e:
-            logger.error(f"WebSocket连接失败: {e}")
-            return False
+        # except Exception as e:
+        #     logger.error(f"WebSocket连接失败: {e}")
+        #     return False
             
     async def send_command(self, command: Dict[str, Any]) -> bool:
         """发送WebSocket命令"""
@@ -552,6 +619,15 @@ class VPSMonitor:
             args = data.get('args', [])
             
             logger.info(f"收到WebSocket消息: {event} - {args}")
+
+            # 处理JWT错误
+            if event == 'jwt error':
+                logger.warning(f"JWT认证错误: {args}")
+                if args and 'exp claim is invalid' in str(args):
+                    logger.warning("JWT token已过期，需要重新连接")
+                    if self.ws_connection:
+                        await self.ws_connection.close()
+                    return
             
             if event == 'auth success':
                 logger.info("✅ WebSocket认证成功")
