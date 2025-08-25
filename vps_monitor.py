@@ -19,6 +19,8 @@ import websockets
 import requests
 from aiohttp import ClientSession, ClientResponse
 
+from aiohttp import web
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -663,19 +665,41 @@ class VPSMonitor:
         self.is_running = False
         logger.info("停止VPS监控")
 
+async def health_check(request):
+    return web.json_response({"status": "running"})
+
 async def main():
     """主函数"""
     config = VPSConfig()
+
+    # 创建web应用用于健康检查
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    
+    # 启动web服务器
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, config.host, config.port)
+    await site.start()
+    
+    logger.info(f"服务已启动在 {config.host}:{config.port}")
     
     async with VPSMonitor(config) as monitor:
         try:
-            await monitor.start()
+            # 同时运行监控和web服务
+            await asyncio.gather(
+                monitor.start(),
+                asyncio.Event().wait()  # 保持运行
+            )
         except KeyboardInterrupt:
             logger.info("收到停止信号")
             monitor.stop()
         except Exception as e:
             logger.error(f"程序异常: {e}")
             monitor.stop()
+        finally:
+            await runner.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
