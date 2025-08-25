@@ -680,10 +680,10 @@ async def main():
     # 启动web服务器
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, config.host, config.port)
+    site = web.TCPSite(runner, "0.0.0.0", 7860)
     await site.start()
     
-    logger.info(f"服务已启动在 {config.host}:{config.port}")
+    logger.info(f"服务已启动在 0.0.0.0:7860")
     
     async with VPSMonitor(config) as monitor:
         try:
