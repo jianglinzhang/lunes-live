@@ -401,8 +401,14 @@ class VPSMonitor:
                 'Origin': self.config.panel_url,
                 'Cookie': cookie_str
             }
+
+            # 创建SSL上下文，禁用证书验证
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
             
-            self.ws_connection = await websockets.connect(ws_url, extra_headers=headers)
+            self.ws_connection = await websockets.connect(ws_url, extra_headers=headers, ssl=ssl_context)
             logger.info("WebSocket连接成功")
             
             # 发送认证命令
