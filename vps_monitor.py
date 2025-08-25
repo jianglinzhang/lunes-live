@@ -668,6 +668,26 @@ class VPSMonitor:
 async def health_check(request):
     return web.json_response({"status": "running"})
 
+async def status_handler(request):
+    try:
+        # 读取最后N行日志
+        lines_to_show = int(request.query.get('lines', 50))
+        
+        if os.path.exists('vps_monitor.log'):
+            with open('vps_monitor.log', 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                recent_lines = lines[-lines_to_show:] if len(lines) > lines_to_show else lines
+                log_content = ''.join(recent_lines)
+        else:
+            log_content = "日志文件不存在"
+            
+        return web.Response(
+            text=f"<pre>{log_content}</pre>",
+            content_type='text/html'
+        )
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
 async def main():
     """主函数"""
     config = VPSConfig()
@@ -676,6 +696,7 @@ async def main():
     app = web.Application()
     app.router.add_get('/', health_check)
     app.router.add_get('/health', health_check)
+    app.router.add_get('/status', status_handler)
     
     # 启动web服务器
     runner = web.AppRunner(app)
